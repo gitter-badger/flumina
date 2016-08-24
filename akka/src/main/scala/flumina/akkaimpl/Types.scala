@@ -4,7 +4,7 @@ import akka.actor.ActorRef
 import akka.util.Timeout
 import cats.kernel.Monoid
 import scodec.bits.BitVector
-import flumina.types.ir.{OffsetMetadata, Record, TopicPartition, TopicPartitionResult}
+import flumina.types.ir.{GroupAssignment, GroupProtocol, OffsetMetadata, Record, TopicPartition, TopicPartitionResult}
 
 import scala.concurrent.duration.FiniteDuration
 
@@ -53,6 +53,12 @@ final case class OffsetsFetch(groupId: String, values: Set[TopicPartition])
 final case class OffsetsCommit(groupId: String, offsets: Map[TopicPartition, OffsetMetadata])
 
 final case class Produce(values: Map[TopicPartition, List[Record]])
+
+final case class JoinGroup(groupId: String, protocol: String, protocols: Seq[GroupProtocol])
+
+final case class SynchronizeGroup(groupId: String, generationId: Int, memberId: String, assignments: Seq[GroupAssignment])
+
+final case class Heartbeat(groupId: String, generationId: Int, memberId: String)
 
 final case class Fetch(values: Map[TopicPartition, Long])
 

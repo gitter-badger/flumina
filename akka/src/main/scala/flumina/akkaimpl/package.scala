@@ -1,9 +1,11 @@
 package flumina
 
 import akka.util.ByteString
+import cats.data.Xor
 import scodec.bits.ByteVector
 
 import scala.annotation.tailrec
+import scala.concurrent.Future
 
 package object akkaimpl {
 
@@ -35,6 +37,13 @@ package object akkaimpl {
         case Nil                => acc.mapValues(_.reverse)
       }
       run(Map(), list.toList)
+    }
+  }
+
+  implicit class RichXor[L, R](val xor: Xor[L, R]) {
+    def toFuture(f: L => Throwable) = xor match {
+      case Xor.Left(err)      => Future.failed(f(err))
+      case Xor.Right(success) => Future.successful(success)
     }
   }
 

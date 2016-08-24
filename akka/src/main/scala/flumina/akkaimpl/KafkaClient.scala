@@ -1,25 +1,71 @@
 package flumina.akkaimpl
 
 import akka.NotUsed
-import akka.actor.{ActorRefFactory, ActorSystem}
-import akka.stream.scaladsl.Source
+import akka.actor.ActorSystem
 import akka.pattern.ask
+import akka.stream.scaladsl.{Flow, Sink, Source}
 import akka.util.Timeout
-import flumina.types.ir.{OffsetMetadata, Record, RecordEntry, TopicPartition}
+import cats.data.Xor
+import flumina.types.ir._
+
+import scala.annotation.tailrec
+import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
 
-final class KafkaClient private (settings: KafkaSettings, actorRefFactory: ActorRefFactory) {
+final class KafkaClient private (settings: KafkaSettings, actorSystem: ActorSystem) {
 
   private implicit val timeout: Timeout = Timeout(settings.requestTimeout)
+  private implicit val executionContext: ExecutionContext = actorSystem.dispatcher
 
-  private val coordinator = actorRefFactory.actorOf(KafkaCoordinator.props(settings))
+  private val coordinator = actorSystem.actorOf(KafkaCoordinator.props(settings))
 
   def produce(values: Map[TopicPartition, List[Record]]) = (coordinator ? Produce(values)).mapTo[Result[Long]]
-  def singleFetch(values: Map[TopicPartition, Long]) =
-    (coordinator ? Fetch(values)).mapTo[Result[List[RecordEntry]]]
 
-  def fetchFromBeginning(topicPartitions: Set[TopicPartition]): Source[RecordEntry, NotUsed] = {
-    def run(tried: Int, lastResult: Result[List[RecordEntry]], lastOffsetRequest: Map[TopicPartition, Long]): Source[RecordEntry, NotUsed] = {
+  def producer(grouped: Int, parallelism: Int) =
+    Flow[(TopicPartition, Record)]
+      .grouped(grouped)
+      .mapAsync(parallelism)(x => produce(x.toMultimap))
+      .to(Sink.ignore)
+
+  private def splitEvenly[A](sequence: TraversableOnce[A], over: Int) = {
+    @tailrec
+    def go(seq: List[A], acc: List[List[A]], split: Int): List[List[A]] =
+      if (seq.size <= split) seq :: acc
+      else go(seq.drop(split), seq.take(split) :: acc, split)
+
+    go(sequence.toList, List.empty, sequence.size / over)
+  }
+
+  def consume(groupId: String, topic: String, nrPartitions: Int): Source[RecordEntry, NotUsed] = {
+    def init = for {
+      joinGroupResult <- joinGroup(groupId, "consumer", Seq(GroupProtocol("range", Seq(ConsumerProtocol(0, Seq(topic), Seq.empty)))))
+      memberAssignment <- joinGroupResult match {
+        case Xor.Left(kafkaResult) =>
+          Future.failed(new Exception("Failed to join group...?"))
+        case Xor.Right(groupResult) =>
+          if (groupResult.leaderId == groupResult.memberId) {
+            val topicPartitionChunks = splitEvenly(TopicPartition.enumerate(topic, nrPartitions), groupResult.members.size)
+            val assignments = groupResult.members
+              .zipWithIndex
+              .map { case (m, idx) => GroupAssignment(m.memberId, MemberAssignment(0, topicPartitionChunks(idx), "assignment for member".getBytes())) }
+
+            syncGroup(groupId, groupResult.generationId, groupResult.memberId, assignments)
+              .flatMap(_.toFuture(err => new Exception(s"Error occurred: $err")))
+          } else {
+            syncGroup(groupId, groupResult.generationId, groupResult.memberId, Seq.empty)
+              .flatMap(_.toFuture(err => new Exception(s"Error occurred: $err")))
+          }
+      }
+      //      offsets <- offsetsFetch(groupId, memberAssignment.topicPartitions.toSet)
+      //      _ = println(s"offsets: $offsets")
+
+      //      offsetMap = offsets.success.map(x => x.topicPartition -> x.value.offset).toMap
+      offsetMap = TopicPartition.enumerate(topic, nrPartitions).map(x => x -> 0l).toMap
+      fetch <- singleFetch(offsetMap)
+    } yield (joinGroupResult, fetch, offsetMap)
+
+    def run(joinGroupResult: JoinGroupResult, nextDelayInSeconds: Int, lastResult: Result[List[RecordEntry]], lastOffsetRequest: Map[TopicPartition, Long]): Source[RecordEntry, NotUsed] = {
+
       if (lastResult.errors.nonEmpty) {
         Source.failed(new Exception("Failing..."))
       } else {
@@ -28,23 +74,58 @@ final class KafkaClient private (settings: KafkaSettings, actorRefFactory: Actor
           .toMap
 
         if (newOffsetRequest === lastOffsetRequest) {
-          Source.fromFuture(FutureUtils.delay(1.seconds * tried.toLong))
-            .flatMapConcat(_ => run(tried + 1, lastResult, lastOffsetRequest))
+          def next = Source.fromFuture {
+            for {
+              //TODO: check output
+              _ <- heartbeat(groupId, joinGroupResult.generationId, joinGroupResult.memberId)
+              delayFactor = Math.min(30, nextDelayInSeconds)
+              _ <- FutureUtils.delay(1.seconds * delayFactor.toLong)
+            } yield ()
+          }
+
+          next.flatMapConcat(_ => run(joinGroupResult, nextDelayInSeconds + 1, lastResult, lastOffsetRequest))
         } else {
-          Source(lastResult.success.flatMap(_.value)) ++ Source.fromFuture(singleFetch(newOffsetRequest))
-            .flatMapConcat(r => run(0, r, newOffsetRequest))
+          def next = Source.fromFuture {
+            for {
+              //TODO: check output
+              _ <- heartbeat(groupId, joinGroupResult.generationId, joinGroupResult.memberId)
+              //TODO: check output
+              _ <- offsetsCommit(groupId, lastOffsetRequest.mapValues(x => OffsetMetadata(x, None)))
+              newResults <- singleFetch(newOffsetRequest)
+            } yield newResults
+          }
+
+          Source(lastResult.success.flatMap(_.value)) ++ next.flatMapConcat(r => run(joinGroupResult, 0, r, newOffsetRequest))
         }
       }
     }
 
-    val firstRequest = topicPartitions.map(_ -> 0l).toMap
-
-    Source.fromFuture(singleFetch(firstRequest))
-      .flatMapConcat(r => run(0, r, firstRequest))
+    Source.fromFuture(init).flatMapConcat {
+      case (joinGroupResult, firstFetch, offsets) =>
+        joinGroupResult match {
+          case Xor.Left(err)  => Source.failed(new Exception(s"Error occurred: $err"))
+          case Xor.Right(res) => run(res, 0, firstFetch, offsets)
+        }
+    }
   }
 
-  def offsetsFetch(groupId: String, values: Set[TopicPartition]) = (coordinator ? OffsetsFetch(groupId, values)).mapTo[Result[OffsetMetadata]]
-  def offsetsCommit(groupId: String, offsets: Map[TopicPartition, OffsetMetadata]) = (coordinator ? OffsetsCommit(groupId, offsets)).mapTo[Result[Unit]]
+  private def offsetsFetch(groupId: String, values: Set[TopicPartition]) =
+    (coordinator ? OffsetsFetch(groupId, values)).mapTo[Result[OffsetMetadata]]
+
+  private def offsetsCommit(groupId: String, offsets: Map[TopicPartition, OffsetMetadata]) =
+    (coordinator ? OffsetsCommit(groupId, offsets)).mapTo[Result[Unit]]
+
+  def singleFetch(values: Map[TopicPartition, Long]) =
+    (coordinator ? Fetch(values)).mapTo[Result[List[RecordEntry]]]
+
+  private def joinGroup(groupId: String, protocol: String, protocols: Seq[GroupProtocol]) =
+    (coordinator ? JoinGroup(groupId, protocol, protocols)).mapTo[KafkaError Xor JoinGroupResult]
+
+  private def syncGroup(groupId: String, generationId: Int, memberId: String, assignments: Seq[GroupAssignment]) =
+    (coordinator ? SynchronizeGroup(groupId, generationId, memberId, assignments)).mapTo[KafkaError Xor MemberAssignment]
+
+  private def heartbeat(groupId: String, generationId: Int, memberId: String) =
+    (coordinator ? Heartbeat(groupId, generationId, memberId)).mapTo[KafkaError Xor Unit]
 }
 
 object KafkaClient {

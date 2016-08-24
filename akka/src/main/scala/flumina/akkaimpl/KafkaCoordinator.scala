@@ -162,7 +162,34 @@ final class KafkaCoordinator private (settings: KafkaSettings) extends Actor wit
 
   def receive = running(State(Map(), Map(), Map(), Map()))
 
+  def getBrokerByGroupId(state: State, groupId: String) = state.byGroupId.get(groupId) match {
+    case Some(broker) =>
+      Future.successful(broker)
+    case None =>
+      self.ask(SyncGroup(groupId))
+        .mapTo[Map[String, KafkaBroker]]
+        .map(x => x.getOrElse(groupId, KafkaBroker.AnyNode))
+  }
+
   def running(state: State): Receive = {
+
+    case JoinGroup(groupId, protocol, protocols) =>
+      (for {
+        broker <- getBrokerByGroupId(state, groupId)
+        result <- runWithBroker(kafka.joinGroup(groupId, protocol, protocols), broker)
+      } yield result) pipeTo sender()
+
+    case SynchronizeGroup(groupId, generationId, memberId, assignments) =>
+      (for {
+        broker <- getBrokerByGroupId(state, groupId)
+        result <- runWithBroker(kafka.syncGroup(groupId, generationId, memberId, assignments), state.byGroupId(groupId))
+      } yield result) pipeTo sender()
+
+    case Heartbeat(groupId, generationId, memberId) =>
+      (for {
+        broker <- getBrokerByGroupId(state, groupId)
+        result <- runWithBroker(kafka.heartbeat(groupId, generationId, memberId), state.byGroupId(groupId))
+      } yield result) pipeTo sender()
 
     case OffsetsFetch(groupId, values) =>
       splitRun(fetchOffsetSplitter(groupId))(brokerMap = state.byGroupId, initialRequest = values) pipeTo sender()
