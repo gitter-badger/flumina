@@ -2,7 +2,7 @@ package flumina.akkaimpl.versions
 
 import akka.pattern.ask
 import cats.data.Xor
-import cats.std.future._
+import cats.instances.future._
 import cats.syntax.cartesian._
 import scodec.bits.BitVector
 import flumina.akkaimpl._
@@ -336,6 +336,10 @@ final class V0(implicit executionContext: ExecutionContext) extends KafkaAlg[Kaf
 
   def pure[A](x: A) = KafkaMonad.pure(x)
   def flatMap[A, B](fa: KafkaMonad[A])(f: (A) => KafkaMonad[B]) = fa.flatMap(f)
+  def tailRecM[A, B](a: A)(f: (A) => KafkaMonad[Either[A, B]]): KafkaMonad[B] = flatMap(f(a)) {
+    case Left(ohh) => tailRecM(ohh)(f)
+    case Right(ohh) => pure(ohh)
+  }
 
   private def extractMemberAssignment(data: MemberAssignmentData) = {
     def extractMemberAssignmentTopicPartition(memberAssignmentTopicPartitions: Seq[MemberAssignmentTopicPartitionData]) = (for {

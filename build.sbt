@@ -50,7 +50,7 @@ lazy val types = project.in(file("types"))
   .settings(
       name := "flumina-types",
       libraryDependencies ++= Seq(
-        "org.typelevel" %% "cats-core" % "0.6.1",
+        "org.typelevel" %% "cats-core" % "0.7.0",
         "org.scodec" %% "scodec-core" % "1.9.0"
       ),
       addCompilerPlugin("org.spire-math" %% "kind-projector" % "0.8.0")

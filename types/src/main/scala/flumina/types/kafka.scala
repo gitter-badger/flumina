@@ -66,5 +66,10 @@ object kafka {
     def flatMap[A, B](fa: Dsl[A])(f: (A) => Dsl[B]) = new Dsl[B] {
       override def apply[F[_]: KafkaAlg] = implicitly[KafkaAlg[F]].flatMap(fa.apply[F])(x => f(x).apply[F])
     }
+
+    override def tailRecM[A, B](a: A)(f: (A) => Dsl[Either[A, B]]): Dsl[B] = flatMap(f(a)) {
+      case Left(ohh) => tailRecM(ohh)(f)
+      case Right(ohh) => pure(ohh)
+    }
   }
 }

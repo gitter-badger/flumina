@@ -47,7 +47,7 @@ final class KafkaConnectionPool private (bootstrapBrokers: Seq[KafkaBroker.Node]
 
       connections.get(tempNode) match {
         case Some(nodes) =>
-          log.debug(s"$node found in connections, picking random one to forward to it")
+          log.debug(s"[api-key: ${request.apiKey}] $node found in connections, picking random one to forward to it")
           randomNode(nodes).foreach(_ forward request)
         case None =>
           if (connectionsBeingSpawned.contains(tempNode)) {
@@ -62,7 +62,7 @@ final class KafkaConnectionPool private (bootstrapBrokers: Seq[KafkaBroker.Node]
 
     case KafkaConnectionPool.BrokerUp(connection, node) =>
       val (matched, nonMatched) = stashedRequestsBuffer.partition(_.request.matchesBroker(node))
-      log.info(s"Broker up $node | [$matched and $nonMatched]")
+      log.info(s"Broker up $node")
       matched.foreach(x => self.tell(x.request, x.from))
       context.become(running(connectionsBeingSpawned - node, nonMatched, connections |+| Map(node -> Set(connection))))
 
