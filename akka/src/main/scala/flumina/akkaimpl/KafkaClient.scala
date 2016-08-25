@@ -21,10 +21,10 @@ final class KafkaClient private (settings: KafkaSettings, actorSystem: ActorSyst
 
   def produce(values: Map[TopicPartition, List[Record]]) = (coordinator ? Produce(values)).mapTo[Result[Long]]
 
-  def producer(grouped: Int) =
+  def producer(grouped: Int, parallelism: Int) =
     Flow[(TopicPartition, Record)]
       .grouped(grouped)
-      .mapAsync(1)(x => produce(x.toMultimap))
+      .mapAsync(parallelism)(x => produce(x.toMultimap))
       .to(Sink.ignore)
 
   private def splitEvenly[A](sequence: TraversableOnce[A], over: Int) = {
@@ -45,6 +45,7 @@ final class KafkaClient private (settings: KafkaSettings, actorSystem: ActorSyst
         case Xor.Right(groupResult) =>
           if (groupResult.leaderId == groupResult.memberId) {
             val topicPartitionChunks = splitEvenly(TopicPartition.enumerate(topic, nrPartitions), groupResult.members.size)
+            //TODO: revise this? Split it up in a configurable strategy?
             val assignments = groupResult.members
               .zipWithIndex
               .map { case (m, idx) => GroupAssignment(m.memberId, MemberAssignment(0, topicPartitionChunks(idx), "assignment for member".getBytes())) }
@@ -80,9 +81,9 @@ final class KafkaClient private (settings: KafkaSettings, actorSystem: ActorSyst
         if (newOffsetRequest === lastOffsetRequest) {
           def next = Source.fromFuture {
             for {
-              //TODO: check output
-              //              _ <- heartbeat(groupId, joinGroupResult.generationId, joinGroupResult.memberId)
               _ <- FutureUtils.delay(1.seconds * Math.min(30, nextDelayInSeconds).toLong)
+              //TODO: check output
+              _ <- heartbeat(groupId, joinGroupResult.generationId, joinGroupResult.memberId)
               newResults <- singleFetch(newOffsetRequest)
             } yield newResults
           }
@@ -92,7 +93,7 @@ final class KafkaClient private (settings: KafkaSettings, actorSystem: ActorSyst
           def next = Source.fromFuture {
             for {
               //TODO: check output
-              //              _ <- heartbeat(groupId, joinGroupResult.generationId, joinGroupResult.memberId)
+              _ <- heartbeat(groupId, joinGroupResult.generationId, joinGroupResult.memberId)
               //TODO: check output
               _ <- offsetsCommit(groupId, lastOffsetRequest.mapValues(x => OffsetMetadata(x, None)))
               newResults <- singleFetch(newOffsetRequest)

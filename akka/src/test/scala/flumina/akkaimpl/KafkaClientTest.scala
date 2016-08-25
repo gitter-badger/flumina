@@ -64,13 +64,13 @@ abstract class KafkaClientTest extends TestKit(ActorSystem())
 
       Source(1 to size)
         .map(x => TopicPartition(name1, x % 1) -> Record.fromByteValue(Seq(x.toByte)))
-        .runWith(client.producer(25))
+        .runWith(client.producer(25, 1))
 
       client.consume(s"${group}_a", name1, 1)
         .map(x => x.record.value.head.toInt)
         .filter(_ % 2 == 0)
         .map(x => TopicPartition(name2, 0) -> Record.fromByteValue(Seq(x.toByte)))
-        .runWith(client.producer(25))
+        .runWith(client.producer(25, 1))
 
       client.consume(s"${group}_b", name2, 1)
         .runWith(TestSink.probe[RecordEntry])
@@ -102,11 +102,11 @@ abstract class KafkaClientTest extends TestKit(ActorSystem())
 
     "producer should work" in new KafkaScope {
       val name = randomTopic(partitions = 10, replicationFactor = 1)
-      val size = 100000
+      val size = 1000000
 
       Source(0 to size)
         .map(x => TopicPartition(name, x % 10) -> Record.fromByteValue(Seq(x.toByte)))
-        .runWith(client.producer(10000))
+        .runWith(client.producer(10000, 10))
 
       client.consume(s"test${System.currentTimeMillis()}", name, 10)
         .runWith(TestSink.probe[RecordEntry])
@@ -125,9 +125,8 @@ abstract class KafkaClientTest extends TestKit(ActorSystem())
 
   private lazy val settings = KafkaSettings(
     bootstrapBrokers = Seq(KafkaBroker.Node("localhost", kafka1Port)),
-    //    bootstrapBrokers = Seq(deadServer(1), deadServer(2), KafkaBroker.Node("localhost", kafka1Port)),
-    connectionsPerBroker = 1,
-    //    connectionsPerBroker = 3,
+//    bootstrapBrokers = Seq(deadServer(1), deadServer(2), KafkaBroker.Node("localhost", kafka1Port)),
+    connectionsPerBroker = 5,
     operationalSettings = KafkaOperationalSettings(
       retryBackoff = 500.milliseconds,
       retryMaxCount = 5,
