@@ -337,7 +337,7 @@ final class V0(implicit executionContext: ExecutionContext) extends KafkaAlg[Kaf
   def pure[A](x: A) = KafkaMonad.pure(x)
   def flatMap[A, B](fa: KafkaMonad[A])(f: (A) => KafkaMonad[B]) = fa.flatMap(f)
   def tailRecM[A, B](a: A)(f: (A) => KafkaMonad[Either[A, B]]): KafkaMonad[B] = flatMap(f(a)) {
-    case Left(ohh) => tailRecM(ohh)(f)
+    case Left(ohh)  => tailRecM(ohh)(f)
     case Right(ohh) => pure(ohh)
   }
 

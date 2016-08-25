@@ -62,7 +62,6 @@ abstract class KafkaClientTest extends TestKit(ActorSystem())
       val name2 = randomTopic(partitions = 1, replicationFactor = 1)
       val size = 100
 
-
       Source(1 to size)
         .map(x => TopicPartition(name1, x % 1) -> Record.fromByteValue(Seq(x.toByte)))
         .runWith(client.producer(25))
@@ -110,7 +109,6 @@ abstract class KafkaClientTest extends TestKit(ActorSystem())
         .runWith(client.producer(10000))
 
       client.consume(s"test${System.currentTimeMillis()}", name, 10)
-//        .alsoTo(Flow[RecordEntry].scan(0)((acc, _) => acc + 1).to(Sink.foreach(println)))
         .runWith(TestSink.probe[RecordEntry])
         .ensureSubscription()
         .request(size.toLong)

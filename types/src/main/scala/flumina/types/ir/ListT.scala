@@ -69,7 +69,7 @@ object ListT {
     override def empty[A]: ListT[F, A] = nil[F, A]
     override def combineK[A](x: ListT[F, A], y: ListT[F, A]): ListT[F, A] = x ++ y
     override def tailRecM[A, B](a: A)(f: (A) => ListT[F, Either[A, B]]): ListT[F, B] = flatMap(f(a)) {
-      case Left(ohh) => tailRecM(ohh)(f)
+      case Left(ohh)  => tailRecM(ohh)(f)
       case Right(ohh) => pure(ohh)
     }
   }

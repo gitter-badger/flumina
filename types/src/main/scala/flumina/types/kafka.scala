@@ -68,7 +68,7 @@ object kafka {
     }
 
     override def tailRecM[A, B](a: A)(f: (A) => Dsl[Either[A, B]]): Dsl[B] = flatMap(f(a)) {
-      case Left(ohh) => tailRecM(ohh)(f)
+      case Left(ohh)  => tailRecM(ohh)(f)
       case Right(ohh) => pure(ohh)
     }
   }
