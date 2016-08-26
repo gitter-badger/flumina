@@ -282,7 +282,8 @@ abstract class KafkaProtocolTest extends TestKit(ActorSystem()) with WordSpecLik
         fetchMaxBytes = 8 * 1024,
         fetchMaxWaitTime = 20.seconds,
         produceTimeout = 20.seconds,
-        groupSessionTimeout = 30.seconds
+        groupSessionTimeout = 30.seconds,
+        heartbeatFrequency = 4
       )
     )
 

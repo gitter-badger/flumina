@@ -36,6 +36,7 @@ final class KafkaClient private (settings: KafkaSettings, actorSystem: ActorSyst
     go(sequence.toList, List.empty, sequence.size / over)
   }
 
+  //TODO: add heartbeats
   def consume(groupId: String, topic: String, nrPartitions: Int): Source[RecordEntry, NotUsed] = {
     def init = for {
       joinGroupResult <- joinGroup(groupId, "consumer", Seq(GroupProtocol("range", Seq(ConsumerProtocol(0, Seq(topic), Seq.empty)))))
@@ -66,24 +67,22 @@ final class KafkaClient private (settings: KafkaSettings, actorSystem: ActorSyst
     } yield (joinGroupResult, fetch, offsetMap)
 
     def run(joinGroupResult: JoinGroupResult, nextDelayInSeconds: Int, lastResult: Result[List[RecordEntry]], lastOffsetRequest: Map[TopicPartition, Long]): Source[RecordEntry, NotUsed] = {
-
       if (lastResult.errors.nonEmpty) {
         Source.failed(new Exception("Failing..."))
       } else {
-        val newOffsetRequest = if (lastResult.success.nonEmpty) {
-          lastResult.success
-            .map(x => x.topicPartition -> (if (x.value.isEmpty) 0l else x.value.maxBy(y => y.offset).offset))
-            .toMap
-        } else {
-          lastOffsetRequest
-        }
+        val newOffsetRequest =
+          if (lastResult.success.nonEmpty) {
+            lastResult.success
+              .map(x => x.topicPartition -> (if (x.value.isEmpty) 0l else x.value.maxBy(y => y.offset).offset))
+              .toMap
+          } else {
+            lastOffsetRequest
+          }
 
         if (newOffsetRequest === lastOffsetRequest) {
           def next = Source.fromFuture {
             for {
-              _ <- FutureUtils.delay(1.seconds * Math.min(30, nextDelayInSeconds).toLong)
-              //TODO: check output
-              _ <- heartbeat(groupId, joinGroupResult.generationId, joinGroupResult.memberId)
+              _ <- FutureUtils.delay(1.seconds * Math.min(settings.operationalSettings.heartbeatInterval.toSeconds, nextDelayInSeconds.toLong))
               newResults <- singleFetch(newOffsetRequest)
             } yield newResults
           }
@@ -92,8 +91,6 @@ final class KafkaClient private (settings: KafkaSettings, actorSystem: ActorSyst
         } else {
           def next = Source.fromFuture {
             for {
-              //TODO: check output
-              _ <- heartbeat(groupId, joinGroupResult.generationId, joinGroupResult.memberId)
               //TODO: check output
               _ <- offsetsCommit(groupId, lastOffsetRequest.mapValues(x => OffsetMetadata(x, None)))
               newResults <- singleFetch(newOffsetRequest)
@@ -108,8 +105,9 @@ final class KafkaClient private (settings: KafkaSettings, actorSystem: ActorSyst
     Source.fromFuture(init).flatMapConcat {
       case (joinGroupResult, firstFetch, offsets) =>
         joinGroupResult match {
-          case Xor.Left(err)  => Source.failed(new Exception(s"Error occurred: $err"))
-          case Xor.Right(res) => run(res, 0, firstFetch, offsets)
+          case Xor.Left(err) => Source.failed(new Exception(s"Error occurred: $err"))
+          case Xor.Right(res) =>
+            run(res, 0, firstFetch, offsets)
         }
     }
   }

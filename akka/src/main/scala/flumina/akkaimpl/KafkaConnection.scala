@@ -65,7 +65,7 @@ final class KafkaConnection private (pool: ActorRef, manager: ActorRef, broker: 
   }
 
   def connect() = {
-    log.info(s"Connecting to $broker")
+    log.debug(s"Connecting to $broker")
     manager ! Tcp.Connect(new InetSocketAddress("localhost", broker.port))
   }
 
@@ -86,7 +86,7 @@ final class KafkaConnection private (pool: ActorRef, manager: ActorRef, broker: 
     stored += data.size
 
     if (stored > maxStored) {
-      log.warning(s"drop connection due buffer overrun")
+      log.error(s"drop connection due buffer overrun")
       context stop self
 
     } else if (stored > highWatermark) {
@@ -129,7 +129,7 @@ final class KafkaConnection private (pool: ActorRef, manager: ActorRef, broker: 
           inFlightRequests -= env.correlationId
 
         case Attempt.Failure(err) =>
-          log.warning(s"Error decoding: ${err.messageWithContext}")
+          log.error(s"Error decoding: ${err.messageWithContext}")
       }
     }
 
@@ -162,18 +162,6 @@ final class KafkaConnection private (pool: ActorRef, manager: ActorRef, broker: 
     }
   }
 
-  def write(request: KafkaConnectionRequest) = {
-    encodeEnvelope(nextCorrelationId, request) match {
-      case Attempt.Successful(msg) =>
-        connection ! Write(msg, Ack(currentOffset))
-        buffer(msg)
-        inFlightRequests += (nextCorrelationId -> Receiver(sender(), request.trace))
-        nextCorrelationId += 1
-
-      case Attempt.Failure(err) => log.warning(s"Error encoding: ${err.messageWithContext}")
-    }
-  }
-
   private def writeFirst(): Unit = {
     connection ! Write(writeBuffer(0), Ack(storageOffset))
   }
@@ -193,7 +181,15 @@ final class KafkaConnection private (pool: ActorRef, manager: ActorRef, broker: 
 
   def connected: Actor.Receive = {
     case request: KafkaConnectionRequest =>
-      write(request)
+      encodeEnvelope(nextCorrelationId, request) match {
+        case Attempt.Successful(msg) =>
+          connection ! Write(msg, Ack(currentOffset))
+          buffer(msg)
+          inFlightRequests += (nextCorrelationId -> Receiver(sender(), request.trace))
+          nextCorrelationId += 1
+
+        case Attempt.Failure(err) => log.error(s"Error encoding: ${err.messageWithContext}")
+      }
     case Ack(ack) => acknowledge(ack)
     case CommandFailed(Write(_, Ack(ack))) =>
       connection ! ResumeWriting
@@ -210,14 +206,23 @@ final class KafkaConnection private (pool: ActorRef, manager: ActorRef, broker: 
   }
 
   def buffering(nack: Int, toAck: Int, peerClosed: Boolean): Actor.Receive = {
-    case request: KafkaConnectionRequest => write(request)
-    case WritingResumed                  => writeFirst()
-    case Received(data)                  => read(data)
-    case PeerClosed                      => context.become(buffering(nack, toAck, peerClosed = true))
-    case Aborted                         => goReconnect()
-    case Closed                          => goReconnect()
+    case request: KafkaConnectionRequest =>
+      encodeEnvelope(nextCorrelationId, request) match {
+        case Attempt.Successful(msg) =>
+          buffer(msg)
+          inFlightRequests += (nextCorrelationId -> Receiver(sender(), request.trace))
+          nextCorrelationId += 1
 
-    case Ack(ack) if ack < nack          => acknowledge(ack)
+        case Attempt.Failure(err) => log.error(s"Error encoding: ${err.messageWithContext}")
+      }
+
+    case WritingResumed         => writeFirst()
+    case Received(data)         => read(data)
+    case PeerClosed             => context.become(buffering(nack, toAck, peerClosed = true))
+    case Aborted                => goReconnect()
+    case Closed                 => goReconnect()
+
+    case Ack(ack) if ack < nack => acknowledge(ack)
     case Ack(ack) =>
       acknowledge(ack)
       if (writeBuffer.nonEmpty) {

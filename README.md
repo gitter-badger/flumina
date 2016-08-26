@@ -32,8 +32,8 @@ val settings = KafkaSettings(
         retryBackoff = 500.milliseconds,
         retryMaxCount = 5,
         fetchMaxBytes = 32 * 1024,
-        fetchMaxWaitTime = 20.seconds,
-        produceTimeout = 20.seconds,
+        fetchMaxWaitTime = 300.milliseconds,
+        produceTimeout = 1.seconds,
         groupSessionTimeout = 30.seconds
     ),
     requestTimeout = 30.seconds
@@ -60,14 +60,27 @@ val produce = (1 to 10000)
 client.produce(produce)
 ```
 
-## Streaming fetch
+## Consume topics
+
+Streaming produce (ignoring the "produce" results) + streaming consumer (with stateful consumer groups).
 
 ```scala
-//returns a Source[RecordEntry, NotUsed]
-//TODO: return per topicPartition a stream, so they can be processed async
-client.fetchFromBeginning(TopicPartition.enumerate(topicName, nrPartitions))
+val group = s"somegroup"
+val topic1 = "topic1"
+val topic2 = "topic2"
+val size = 100000
+val producer = client.producer(grouped = 5000, parallelism = 5)
+
+Source(1 to size)
+    .map(x => TopicPartition(topic1, 0) -> Record.fromByteValue(Seq(x.toByte)))
+    .runWith(producer)
+
+client.consume(groupId = s"${group}_a", topic = topic1, nrPartitions = 1)
+    .map(x => x.record.value.head.toInt)
+    .filter(_ % 2 == 0)
+    .map(x => TopicPartition(topic2, 0) -> Record.fromByteValue(Seq(x.toByte)))
+    .runWith(producer)
+
+client.consume(groupId = s"${group}_b", topic = topic2, nrPartitions = 1)
+    .runWith(Sink.foreach(println))
 ```
-
-### Offsets
-
-TODO

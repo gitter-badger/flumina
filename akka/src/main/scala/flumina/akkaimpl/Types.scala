@@ -6,7 +6,7 @@ import cats.kernel.Monoid
 import scodec.bits.BitVector
 import flumina.types.ir.{GroupAssignment, GroupProtocol, OffsetMetadata, Record, TopicPartition, TopicPartitionResult}
 
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration._
 
 final case class KafkaSettings(
   bootstrapBrokers:     Seq[KafkaBroker.Node],
@@ -16,13 +16,17 @@ final case class KafkaSettings(
 )
 
 final case class KafkaOperationalSettings(
-  retryBackoff:        FiniteDuration,
-  retryMaxCount:       Int,
-  fetchMaxWaitTime:    FiniteDuration,
-  fetchMaxBytes:       Int,
-  produceTimeout:      FiniteDuration,
-  groupSessionTimeout: FiniteDuration
-)
+    retryBackoff:        FiniteDuration,
+    retryMaxCount:       Int,
+    fetchMaxWaitTime:    FiniteDuration,
+    fetchMaxBytes:       Int,
+    produceTimeout:      FiniteDuration,
+    groupSessionTimeout: FiniteDuration,
+    heartbeatFrequency:  Int
+) {
+
+  lazy val heartbeatInterval = (groupSessionTimeout.toMillis / heartbeatFrequency).milliseconds
+}
 
 final case class KafkaContext(
   connectionPool: ActorRef,

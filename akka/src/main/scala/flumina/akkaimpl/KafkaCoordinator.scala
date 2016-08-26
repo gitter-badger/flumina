@@ -129,7 +129,7 @@ final class KafkaCoordinator private (settings: KafkaSettings) extends Actor wit
             def newResultsWithCurrentErrors = Future.successful(results |+| Result(success.toSet, errors.map(_.topicPartition).toSet))
 
             if (H.nonEmpty(canRetry) && retries < defaultContext.settings.retryMaxCount) {
-              log.error(s"We encountered ${H.size(canRetry)} requests which can be retried")
+              log.warning(s"We encountered ${H.size(canRetry)} requests which can be retried")
 
               val rerun = for {
 
