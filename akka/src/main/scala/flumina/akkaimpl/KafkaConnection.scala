@@ -43,8 +43,6 @@ final class KafkaConnection private (pool: ActorRef, manager: ActorRef, broker: 
   private var storageOffset: Int = 0
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
   private var stored: Int = 0
-  @SuppressWarnings(Array("org.wartremover.warts.Var"))
-  private var suspended: Boolean = false
 
   private def currentOffset = storageOffset + writeBuffer.size
 
@@ -88,11 +86,6 @@ final class KafkaConnection private (pool: ActorRef, manager: ActorRef, broker: 
     if (stored > maxStored) {
       log.error(s"drop connection due buffer overrun")
       context stop self
-
-    } else if (stored > highWatermark) {
-      log.debug(s"suspending reading at $currentOffset")
-      connection ! SuspendReading
-      suspended = true
     }
   }
 
@@ -105,12 +98,6 @@ final class KafkaConnection private (pool: ActorRef, manager: ActorRef, broker: 
 
     storageOffset += 1
     writeBuffer = writeBuffer drop 1
-
-    if (suspended && stored < lowWatermark) {
-      log.debug("resuming reading")
-      connection ! ResumeReading
-      suspended = false
-    }
   }
 
   def read(data: ByteString) = {
@@ -275,7 +262,7 @@ final class KafkaConnection private (pool: ActorRef, manager: ActorRef, broker: 
   def encodeEnvelope(correlationId: Int, request: KafkaConnectionRequest) = {
     RequestEnvelope.codec.encode(RequestEnvelope(request.apiKey, request.version, correlationId, Some("flumina"), request.requestPayload)).map { bytes =>
 
-      val msg = bytes.toByteVector.toByteString
+      val msg = bytes.toByteString
       val msgSize = msg.size
       val header = ByteString((msgSize >> 24) & 0xFF, (msgSize >> 16) & 0xFF, (msgSize >> 8) & 0xFF, msgSize & 0xFF)
 
@@ -287,7 +274,7 @@ final class KafkaConnection private (pool: ActorRef, manager: ActorRef, broker: 
     }
   }
 
-  def decodeEnvelope(byteString: ByteString) = ResponseEnvelope.codec.decodeValue(byteString.toByteVector.toBitVector)
+  def decodeEnvelope(byteString: ByteString) = ResponseEnvelope.codec.decodeValue(byteString.toBitVector)
 }
 
 object KafkaConnection {

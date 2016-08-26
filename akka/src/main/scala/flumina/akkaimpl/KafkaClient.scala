@@ -36,6 +36,15 @@ final class KafkaClient private (settings: KafkaSettings, actorSystem: ActorSyst
     go(sequence.toList, List.empty, sequence.size / over)
   }
 
+  private def timedFuture[A](name: String, f: => Future[A]) = {
+    val start = System.currentTimeMillis()
+    f.onComplete { res =>
+      val timeTaken = System.currentTimeMillis() - start
+      println(s"$name took $timeTaken ms")
+    }
+    f
+  }
+
   //TODO: add heartbeats
   def consume(groupId: String, topic: String, nrPartitions: Int): Source[RecordEntry, NotUsed] = {
     def init = for {
@@ -89,13 +98,9 @@ final class KafkaClient private (settings: KafkaSettings, actorSystem: ActorSyst
 
           next.flatMapConcat(r => run(joinGroupResult, nextDelayInSeconds + 1, r, newOffsetRequest))
         } else {
-          def next = Source.fromFuture {
-            for {
-              //TODO: check output
-              _ <- offsetsCommit(groupId, lastOffsetRequest.mapValues(x => OffsetMetadata(x, None)))
-              newResults <- singleFetch(newOffsetRequest)
-            } yield newResults
-          }
+          def commit = offsetsCommit(groupId, lastOffsetRequest.mapValues(x => OffsetMetadata(x, None)))
+          def fetch = singleFetch(newOffsetRequest)
+          def next = Source.fromFuture((commit zip fetch).map { case (_, results) => results })
 
           Source(lastResult.success.flatMap(_.value)) ++ next.flatMapConcat(r => run(joinGroupResult, 0, r, newOffsetRequest))
         }

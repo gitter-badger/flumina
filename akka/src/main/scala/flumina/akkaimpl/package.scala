@@ -2,7 +2,7 @@ package flumina
 
 import akka.util.ByteString
 import cats.data.Xor
-import scodec.bits.ByteVector
+import scodec.bits.{BitVector, ByteVector}
 
 import scala.annotation.tailrec
 import scala.concurrent.Future
@@ -11,6 +11,11 @@ package object akkaimpl {
 
   implicit class EnrichedByteString(val value: ByteString) extends AnyVal {
     def toByteVector: ByteVector = ByteVector.viewAt((idx: Long) => value(idx.toInt), value.size.toLong)
+    def toBitVector: BitVector = BitVector.view(value.asByteBuffer)
+  }
+
+  implicit class EnrichedBitVector(val value: BitVector) extends AnyVal {
+    def toByteString: ByteString = ByteString(value.toByteBuffer)
   }
 
   implicit class EnrichedByteVector(val value: ByteVector) extends AnyVal {

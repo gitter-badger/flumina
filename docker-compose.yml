@@ -5,7 +5,7 @@ zookeeper:
 kafka:
   image: wurstmeister/kafka
   ports:
-    - "9092"
+    - "9092:9092"
   links:
     - zookeeper:zk
   environment:

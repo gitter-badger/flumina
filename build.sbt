@@ -81,3 +81,16 @@ lazy val akka = project.in(file("akka"))
       coverageFailOnMinimum := false,
       addCompilerPlugin("org.spire-math" %% "kind-projector" % "0.8.0")
   ).dependsOn(types)
+
+
+lazy val akkaBenchmark = project.in(file("akkaBenchmark"))
+    .settings(commonSettings)
+    .settings(
+      name := "flumina-akka-benchmark",
+      parallelExecution in Test := false,
+      libraryDependencies ++= Seq(
+        "io.dropwizard.metrics" % "metrics-core" % "3.1.0",
+        "com.github.japgolly.nyaya" %% "nyaya-gen" % "0.7.0",
+        "org.apache.kafka" %% "kafka" % "0.10.0.0"
+      )
+    ).dependsOn(akka)
