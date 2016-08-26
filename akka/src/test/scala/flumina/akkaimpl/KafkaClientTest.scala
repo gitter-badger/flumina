@@ -102,11 +102,11 @@ abstract class KafkaClientTest extends TestKit(ActorSystem())
 
     "producer should work" in new KafkaScope {
       val name = randomTopic(partitions = 10, replicationFactor = 1)
-      val size = 1000000
+      val size = 100000
 
       Source(0 to size)
         .map(x => TopicPartition(name, x % 10) -> Record.fromByteValue(Seq(x.toByte)))
-        .runWith(client.producer(10000, 10))
+        .runWith(client.producer(5000, 5))
 
       client.consume(s"test${System.currentTimeMillis()}", name, 10)
         .runWith(TestSink.probe[RecordEntry])
