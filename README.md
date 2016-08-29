@@ -1,6 +1,8 @@
 Flumina
 ===
 
+[![Join the chat at https://gitter.im/flumina/Lobby](https://badges.gitter.im/flumina/Lobby.svg)](https://gitter.im/flumina/Lobby?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
+
 [![Build Status](https://travis-ci.org/vectos/flumina.svg)](https://travis-ci.org/vectos/flumina)
 [![Coverage Status](https://coveralls.io/repos/github/vectos/flumina/badge.svg?branch=master)](https://coveralls.io/github/vectos/flumina?branch=master)
 [![Dependencies](https://app.updateimpact.com/badge/762391907245625344/flumina.svg?config=runtime)](https://app.updateimpact.com/latest/762391907245625344/flumina)
